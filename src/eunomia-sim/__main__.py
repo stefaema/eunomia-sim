@@ -1,14 +1,18 @@
 import dearpygui.dearpygui as dpg
 from .core.persistance_api import *
 
+def key_press_handler(sender, key_code):
+    """Maneja teclas presionadas para mejorar la UX."""
+    if key_code == dpg.mvKey_Delete or key_code == dpg.mvKey_Back:
+        selected_links = dpg.get_selected_links(node_editor="node_editor")
+        for link in selected_links:
+            delink_callback(sender="node_editor", app_data=link)
+
 # LÓGICA DE LA INTERFAZ (DearPyGUI)
 
 def build_gui_from_db(editor_tag):
     """
-    Lee la base de datos y construye la interfaz de nodos en el editor especificado.
-    Utiliza alias/tags para mapear los IDs de la DB con los de DPG.
-    - Nodos: "node_{node.id}"
-    - Puertos: "port_{port.id}"
+    Construye nodos, puertos y conexiones en la GUI.
     """
     db.connect(reuse_if_open=True)
     
@@ -38,13 +42,16 @@ def build_gui_from_db(editor_tag):
 def link_callback(sender, app_data):
     """Se ejecuta cuando el usuario CREA un enlace en la GUI."""
     print(app_data)
-    from_port_tag, to_port_tag = app_data
+    from_port_tag = dpg.get_item_alias(app_data[0])
+    to_port_tag = dpg.get_item_alias(app_data[1])
+
+    print(f"Intentando crear conexión en DB: {from_port_tag} -> {to_port_tag}")
     
     
     # Extraer IDs de la DB desde los tags de DPG (ej. "port_1" -> 1)
-    from_port_id = int(from_port_tag)
-    to_port_id = int(to_port_tag)
-    
+    from_port_id = int(from_port_tag.split('_')[1])
+    to_port_id = int(to_port_tag.split('_')[1])
+
     try:
         db.connect(reuse_if_open=True)
         with db.atomic(): # Transacción para seguridad
@@ -73,11 +80,13 @@ def link_callback(sender, app_data):
 
 def delink_callback(sender, app_data):
     """Se ejecuta cuando el usuario ELIMINA un enlace en la GUI."""
-    link_tag = app_data
+    print(f"Intentando eliminar conexión en DB: {app_data}")
+    print(app_data)
     
     # Obtener los puertos que este enlace conecta
-    config = dpg.get_item_configuration(link_tag)
-    from_port_tag, to_port_tag = config["attr_1"], config["attr_2"]
+    config = dpg.get_item_configuration(app_data)
+    print(f"Link config: {config}")
+    from_port_tag, to_port_tag = dpg.get_item_alias(config["attr_1"]), dpg.get_item_alias(config["attr_2"])
 
     # Extraer IDs de la DB
     from_port_id = int(from_port_tag.split('_')[1])
@@ -95,7 +104,7 @@ def delink_callback(sender, app_data):
 
             if deleted_rows > 0:
                 # Si se borró de la DB, borrar el item de la GUI
-                dpg.delete_item(link_tag)
+                dpg.delete_item(app_data)
                 print(f"Conexión eliminada de la DB: Puerto {from_port_id} -> Puerto {to_port_id}")
             else:
                 print("Error: La conexión a eliminar no se encontró en la DB.")
@@ -134,15 +143,14 @@ def save_node_positions():
 # ==============================================================================
 
 def main():
-    # Asegurarse de que la base de datos está inicializada
-    # Si el archivo no existe, init_db() lo creará y poblará
+    """Punto de entrada principal de la aplicación."""
+    # Inicializar DB si no existe
     try:
         db.connect()
         # Comprobar si las tablas existen
         if not db.table_exists('node'):
              print("Base de datos no encontrada o vacía. Inicializando...")
-             # Cerrar la conexión para que init_db la pueda manejar
-             db.close()
+             db.close() # Cerrar, ya que init_db() la volverá a abrir
              init_db()
     finally:
         if not db.is_closed():
@@ -151,12 +159,24 @@ def main():
 
     dpg.create_context()
 
-    with dpg.window(label="Eunomia - Dossier de Acción", tag="Primary Window"):
-        dpg.add_button(label="Guardar Posiciones", callback=save_node_positions)
-        
-        with dpg.node_editor(callback=link_callback, delink_callback=delink_callback, tag="node_editor"):
-            # Esta función llenará el editor con los datos de la DB
-            build_gui_from_db("node_editor")
+    with dpg.handler_registry():
+        dpg.add_key_press_handler(callback=key_press_handler)
+
+    with dpg.window(label="Eunomia - Dossier de Accion", tag="Primary Window"):
+
+        with dpg.window(label="Controles", width=1200, height=50, pos=[0, 0]):
+            dpg.add_button(label="Guardar Posiciones", callback=save_node_positions)
+
+        with dpg.group(horizontal=True):
+            with dpg.window(label="Nodos", width=1000, height=600, pos=[0, 50]):
+                with dpg.node_editor(callback=link_callback, delink_callback=delink_callback, tag="node_editor"):
+                    # Esta función llenará el editor con los datos de la DB
+                    build_gui_from_db("node_editor")
+
+            with dpg.window(label="Panel de Nodos", width=200, height=600, pos=[1010, 50]):
+                dpg.add_button(label="Añadir Nodo")
+                dpg.add_button(label="Eliminar Nodo")
+                dpg.add_button(label="Configurar Nodo")
 
     dpg.create_viewport(title='Eunomia - Dossier de Acción', width=1200, height=800)
     dpg.setup_dearpygui()

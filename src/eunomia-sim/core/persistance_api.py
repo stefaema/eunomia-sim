@@ -152,14 +152,14 @@ def init_db():
     db.create_tables([NodeType, Node, Port, PortParameter, Connection, NodeCallback])
 
     # Tipos
-    physical, _ = NodeType.get_or_create(name="physical")
-    simulated, _ = NodeType.get_or_create(name="simulated")
-    virtual, _ = NodeType.get_or_create(name="virtual")
+    physical, _ = NodeType.get_or_create(name="FISICA")
+    simulated, _ = NodeType.get_or_create(name="SIM")
+    virtual, _ = NodeType.get_or_create(name="VIRTUAL")
 
     # Nodos físicos iniciales
-    accs, _ = Node.get_or_create(name="Autonomous Central Control System", node_type=physical)
-    solar_plant, _ = Node.get_or_create(name="Solar-based Main Power Plant", node_type=physical)
-    thermal_plant, _ = Node.get_or_create(name="Thermal-based Backup Power Plant", node_type=physical)
+    accs, _ = Node.get_or_create(name="Sistema Autonomo de Control Central", node_type=physical)
+    solar_plant, _ = Node.get_or_create(name="Planta de Generacion Solar Principal", node_type=physical)
+    thermal_plant, _ = Node.get_or_create(name="Planta de Energia Termica de Respaldo", node_type=physical)
 
     # Crear puertos para solar y accs
     solar_out, _ = Port.get_or_create(node=solar_plant, port_name="CTRL #1", port_type="output")
