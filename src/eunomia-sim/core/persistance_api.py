@@ -2,8 +2,8 @@ from peewee import *
 import json
 from collections import deque
 
-INPUT_DENOM = ("input", "Input", "i", "I", "IN")
-OUTPUT_DENOM = ("output", "Output", "o", "O", "OUT")
+INPUT_DENOM = ("input")
+OUTPUT_DENOM = ("output")
 
 db = SqliteDatabase('system.db')
 
@@ -24,6 +24,8 @@ class Node(BaseModel):
     id = AutoField()
     name = CharField()
     node_type = ForeignKeyField(NodeType, backref='nodes')
+    pos_x = IntegerField(default=50)
+    pos_y = IntegerField(default=50)
 
 
 class Port(BaseModel):
@@ -47,16 +49,17 @@ class Connection(BaseModel):
     id = AutoField()
     from_port = ForeignKeyField(Port, backref='outgoing_connections')
     to_port = ForeignKeyField(Port, backref='incoming_connections')
+    protocol = CharField(default="MQTT")  # Opcional: protocolo de comunicación, default is JSON over MQTT
 
 
 class NodeCallback(BaseModel):
     """Callbacks asociados a nodos: Qué hace un nodo virtual o simulado."""
     id = AutoField()
-    node = ForeignKeyField(Node, backref='callbacks')
+    node = ForeignKeyField(Node, backref='callback')
     callback_name = CharField()
 
 
-# === Dispatcher con decorador y propagación ===
+
 CALLBACKS = {}
 
 
@@ -117,17 +120,18 @@ def run_node(node: Node):
 
 def run_cascade(start_node: Node):
     """Ejecuta un nodo y todos los que se vean afectados por su salida."""
-    queue = deque([start_node])
-    visited = set()
-    while queue:
-        node = queue.popleft()
-        if node.id in visited:
-            continue
-        visited.add(node.id)
-        next_nodes = run_node(node)
-        for n in next_nodes:
-            if n.id not in visited:
-                queue.append(n)
+    with db.atomic():
+        queue = deque([start_node])
+        visited = set()
+        while queue:
+            node = queue.popleft()
+            if node.id in visited:
+                continue
+            visited.add(node.id)
+            next_nodes = run_node(node)
+            for n in next_nodes:
+                if n.id not in visited:
+                    queue.append(n)
 
 
 def _auto_cast(value: str):
@@ -155,12 +159,22 @@ def init_db():
     # Nodos físicos iniciales
     accs, _ = Node.get_or_create(name="Autonomous Central Control System", node_type=physical)
     solar_plant, _ = Node.get_or_create(name="Solar-based Main Power Plant", node_type=physical)
+    thermal_plant, _ = Node.get_or_create(name="Thermal-based Backup Power Plant", node_type=physical)
 
     # Crear puertos para solar y accs
-    solar_out, _ = Port.get_or_create(node=solar_plant, port_name="power_out", port_type="output")
-    accs_in, _ = Port.get_or_create(node=accs, port_name="power_in", port_type="input")
+    solar_out, _ = Port.get_or_create(node=solar_plant, port_name="CTRL #1", port_type="output")
+
+    for i in range(1, 4):
+        Port.get_or_create(node=accs, port_name=f"CTRL #{i}", port_type="input")
+
+
+    thermal_out, _ = Port.get_or_create(node=thermal_plant, port_name="CTRL #1", port_type="output")
+
 
     # Conectar solar → accs
-    Connection.get_or_create(from_port=solar_out, to_port=accs_in)
-
+    Connection.get_or_create(from_port=solar_out, to_port=Port.get_or_none(node=accs, port_name="CTRL #1"))
+    print("Database initialized with default nodes and connections.")
     db.close()
+
+if __name__ == "__main__":
+    init_db()
