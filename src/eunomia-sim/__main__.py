@@ -1,6 +1,33 @@
+import shutil
 import dearpygui.dearpygui as dpg
 from .core.persistance_api import *
+from peewee import *
+from .core.commit_system import *
 
+
+
+
+
+ 
+def start_db_staging():
+    """Copia la DB principal a una DB temporal y la inicializa como conexión activa."""
+    shutil.copyfile(MAIN_DB_PATH, STAGE_DB_PATH)
+    db = SqliteDatabase(STAGE_DB_PATH)
+    db_proxy.initialize(db)
+    db_proxy.connect()
+    print(f"Staging DB inicializada en {STAGE_DB_PATH}")
+
+def commit_changes_panel():
+    """Abre un modal para ingresar el mensaje de commit y confirmar."""
+    with dpg.window(label="Commit Changes", width=400, height=200, pos=[600, 300], modal=True, tag="commit_modal"):
+        changes = generate_diff()
+        changes_msg = stringify_changes(changes)
+        dpg.add_text(changes_msg, wrap=300)
+        dpg.add_input_text(label="Mensaje de Commit", tag="commit_message")
+        dpg.add_input_text(label="Contraseña", password=True, tag="auth_password")
+        dpg.add_input_text(label="Token 2FA", tag="auth_2fa_token")
+        dpg.add_button(label="Siguiente", callback=lambda s, a: commit_changes_to_db())
+        dpg.add_button(label="Cancelar", callback=lambda s, a: dpg.delete_item("commit_modal"))
 
 def add_port_to_node():
     """Añade un puerto a un nodo seleccionado en la DB y la GUI."""
@@ -17,8 +44,8 @@ def add_port_to_node():
     node_id = int(node_selection.split('_')[-1])
     
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic():
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic():
             node = Node.get_by_id(node_id)
             new_port = Port.create(node=node, port_name=port_name, port_type=port_type)
 
@@ -34,8 +61,8 @@ def add_port_to_node():
     except Exception as e:
         print(f"Error al añadir el puerto: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
     
     dpg.delete_item("add_ports_modal")
 
@@ -43,8 +70,8 @@ def add_port_to_node():
 def confirm_remove_nodes(selected_nodes):
     """Elimina nodos seleccionados de la DB y la GUI."""
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic():
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic():
             for node_tag in selected_nodes:
                 node_id = int(dpg.get_item_alias(node_tag).split('_')[1])
                 node = Node.get_by_id(node_id)
@@ -69,8 +96,8 @@ def confirm_remove_nodes(selected_nodes):
     except Exception as e:
         print(f"Error al eliminar nodos: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
     
     dpg.delete_item("remove_node_modal")
 
@@ -87,8 +114,8 @@ def confirm_remove_port():
     node_id = int(node_selection.split('_')[-1])
     
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic():
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic():
             port = Port.get_by_id(port_id)
             
             # Eliminar conexiones asociadas
@@ -109,8 +136,8 @@ def confirm_remove_port():
     except Exception as e:
         print(f"Error al eliminar el puerto: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
     
     dpg.delete_item("remove_ports_modal")
 
@@ -124,8 +151,8 @@ def create_node_and_close_modal():
         return
 
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic():
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic():
             node_type = NodeType.get(NodeType.name == node_type_name)
             new_node = Node.create(name=node_name, node_type=node_type.id, pos_x=50, pos_y=50)
             # Crea puertos para evitar bug
@@ -145,8 +172,8 @@ def create_node_and_close_modal():
     except Exception as e:
         print(f"Error al crear el nodo: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
     
     dpg.delete_item("add_node_modal")
 
@@ -195,15 +222,15 @@ def remove_ports_callback(sender, app_data):
         node_id = int(dpg.get_item_alias(select_nodes[0]).split('_')[-1])
         
         try:
-            db.connect(reuse_if_open=True)
+            db_proxy.connect(reuse_if_open=True)
             node = Node.get_by_id(node_id)
             port_items = [f"{port.port_name} (ID: {port.id})" for port in node.ports]
         except Exception as e:
             print(f"Error al obtener puertos: {e}")
             port_items = []
         finally:
-            if not db.is_closed():
-                db.close()
+            if not db_proxy.is_closed():
+                db_proxy.close()
         
         if not port_items:
             dpg.add_text("No hay puertos para eliminar.")
@@ -225,7 +252,7 @@ def build_gui_from_db(editor_tag):
     """
     Construye nodos, puertos y conexiones en la GUI.
     """
-    db.connect(reuse_if_open=True)
+    db_proxy.connect(reuse_if_open=True)
     
     for node in Node.select(): # Para todos los nodos en la DB
         node_label = f"[{NodeType.get_by_id(node.node_type).name}] {node.name} - #{node.id}"
@@ -247,7 +274,7 @@ def build_gui_from_db(editor_tag):
         if dpg.does_item_exist(from_port_tag) and dpg.does_item_exist(to_port_tag):
             dpg.add_node_link(from_port_tag, to_port_tag, parent=editor_tag)
 
-    db.close()
+    db_proxy.close()
 
 
 def link_callback(sender, app_data):
@@ -264,8 +291,8 @@ def link_callback(sender, app_data):
     to_port_id = int(to_port_tag.split('_')[1])
 
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic(): # Transacción para seguridad
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic(): # Transacción para seguridad
             # Obtener los objetos Port desde la DB
             from_port = Port.get_by_id(from_port_id)
             to_port = Port.get_by_id(to_port_id)
@@ -281,12 +308,12 @@ def link_callback(sender, app_data):
                 print("Error: Conexión inválida (debe ser de un puerto Output a uno Input).")
 
     except DoesNotExist:
-        print(f"Error: No se encontró el puerto con ID {from_port_id} o {to_port_id} en la DB.")
+        print(f"Error: No se encontró el puerto con ID {from_port_id} o {to_port_id} en la DB_proxy.")
     except Exception as e:
         print(f"Error al crear la conexión en la DB: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
 
 
 def delink_callback(sender, app_data):
@@ -303,8 +330,8 @@ def delink_callback(sender, app_data):
     to_port_id = int(to_port_tag.split('_')[1])
 
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic():
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic():
             # Buscar y eliminar la conexión en la base de datos
             query = Connection.delete().where(
                 (Connection.from_port == from_port_id) & 
@@ -317,20 +344,20 @@ def delink_callback(sender, app_data):
                 dpg.delete_item(app_data)
                 print(f"Conexión eliminada de la DB: Puerto {from_port_id} -> Puerto {to_port_id}")
             else:
-                print("Error: La conexión a eliminar no se encontró en la DB.")
+                print("Error: La conexión a eliminar no se encontró en la DB_proxy.")
     
     except Exception as e:
         print(f"Error al eliminar la conexión de la DB: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
 
 
 def save_node_positions():
-    """Guarda la posición actual de todos los nodos en la DB."""
+    """Guarda la posición actual de todos los nodos en la DB_proxy."""
     try:
-        db.connect(reuse_if_open=True)
-        with db.atomic():
+        db_proxy.connect(reuse_if_open=True)
+        with db_proxy.atomic():
             for node_db in Node.select():
                 node_tag = f"node_{node_db.id}"
                 if dpg.does_item_exist(node_tag):
@@ -344,8 +371,8 @@ def save_node_positions():
     except Exception as e:
         print(f"Error al guardar posiciones: {e}")
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
 
 
 # ==============================================================================
@@ -356,15 +383,16 @@ def main():
     """Punto de entrada principal de la aplicación."""
     # Inicializar DB si no existe
     try:
-        db.connect()
+        start_db_staging()
+        db_proxy.connect(reuse_if_open=True)
         # Comprobar si las tablas existen
-        if not db.table_exists('node'):
+        if not db_proxy.table_exists('node'):
              print("Base de datos no encontrada o vacía. Inicializando...")
-             db.close() # Cerrar, ya que init_db() la volverá a abrir
+             db_proxy.close() # Cerrar, ya que init_db() la volverá a abrir
              init_db()
     finally:
-        if not db.is_closed():
-            db.close()
+        if not db_proxy.is_closed():
+            db_proxy.close()
 
 
     dpg.create_context()
@@ -377,7 +405,7 @@ def main():
         with dpg.window(label="Controles", width=1800, height=50, pos=[0, 0]):
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Guardar Posiciones", callback=save_node_positions)
-                dpg.add_button(label="Commit Cambios", callback=lambda: print("Funcionalidad de commit no implementada aún."))
+                dpg.add_button(label="Commit Cambios", callback=lambda: commit_changes_panel())
 
         with dpg.group(horizontal=True):
             with dpg.window(label="Nodos", width=1600, height=600, pos=[0, 50]):

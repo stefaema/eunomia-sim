@@ -2,16 +2,18 @@ from peewee import *
 import json
 from collections import deque
 
+MAIN_DB_PATH = 'system.db'
+STAGE_DB_PATH = 'system_stage.db'
+
 INPUT_DENOM = ("input")
 OUTPUT_DENOM = ("output")
 
-db = SqliteDatabase('system.db')
-
+db_proxy = DatabaseProxy() 
 
 class BaseModel(Model):
     """Modelo base para no repetir la conexión a la DB."""
     class Meta:
-        database = db
+        database = db_proxy
 
 class Commit(BaseModel):
     """Commits para versionar el estado del sistema."""
@@ -130,7 +132,7 @@ def run_node(node: Node):
     return connected_nodes
 
 
-def run_cascade(start_node: Node):
+def run_cascade(db, start_node: Node):
     """Ejecuta un nodo y todos los que se vean afectados por su salida."""
     with db.atomic():
         queue = deque([start_node])
@@ -159,7 +161,9 @@ def _auto_cast(value: str):
 
 
 # === INIT DB ===
-def init_db():
+def init_db(db_path='system.db'):
+    db = SqliteDatabase(db_path)
+    db_proxy.initialize(db)
     db.connect()
     db.create_tables([NodeType, Node, Port, PortParameter, Connection, NodeCallback])
 
