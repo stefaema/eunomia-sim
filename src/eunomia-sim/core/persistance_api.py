@@ -13,6 +13,18 @@ class BaseModel(Model):
     class Meta:
         database = db
 
+class Commit(BaseModel):
+    """Commits para versionar el estado del sistema."""
+    id = AutoField()
+    message = CharField()
+    timestamp = DateTimeField(constraints=[SQL('DEFAULT CURRENT_TIMESTAMP')])
+
+class Change(BaseModel):
+    """Cambios individuales dentro de un commit."""
+    id = AutoField()
+    commit = ForeignKeyField(Commit, backref='changes')
+    change_type = CharField()  # e.g., 'add_node', 'remove_node', 'update_port'
+    details = TextField()  # JSON string with details of the change
 
 class NodeType(BaseModel):
     """Tipos de nodos: fisico, simulado o virtual."""
