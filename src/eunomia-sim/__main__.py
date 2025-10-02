@@ -1,14 +1,27 @@
 import shutil
+import time
 import dearpygui.dearpygui as dpg
 from .core.persistance_api import *
 from peewee import *
 from .core.commit_system import *
 
+def show_commit_history():
+    """Muestra el historial de commits en un modal."""
+    commits = get_commits()
 
+    with dpg.window(label="Historial de Commits", width=600, height=400, pos=[500, 200], modal=True, tag="commits_history_modal"):
+        for commit in commits:
+            dpg.add_text(f"Message: {commit.get('message', 'No message')}")
+            dpg.add_text(f"Hash: {commit.get('diff_hash', 'N/A')}")
+            dpg.add_text(f"Timestamp: {commit['timestamp']}")
+    
+            dpg.add_text(f"Author: {commit['author']}")
+            dpg.add_text(f"Admin: {commit['admin']}")
+            dpg.add_button(label="Rollback [Beta]", tag=f"rollback_{commit['timestamp']}", callback=lambda s, a, c=commit: print(f"Rollback to {c['timestamp']} not implemented."))
+            dpg.add_separator()
 
+        dpg.add_button(label="Cerrar", callback=lambda s, a: dpg.delete_item("commits_history_modal"))
 
-
- 
 def start_db_staging():
     """Copia la DB principal a una DB temporal y la inicializa como conexión activa."""
     shutil.copyfile(MAIN_DB_PATH, STAGE_DB_PATH)
@@ -16,6 +29,40 @@ def start_db_staging():
     db_proxy.initialize(db)
     db_proxy.connect()
     print(f"Staging DB inicializada en {STAGE_DB_PATH}")
+
+should_fail = True
+
+def handle_test():
+    """Función de prueba para simular la ejecución de tests."""
+
+    commit_msg = dpg.get_value("commit_message")
+
+    nodes = list(Node.select().where(Node.node_type == 1))
+    #Change GUI name from FISICA to SIM
+    for n in nodes:
+        n_tag = f"node_{n.id}"
+        if dpg.does_item_exist(n_tag):
+            dpg.set_item_label(n_tag, dpg.get_item_label(n_tag).replace("FISICA", "SIM"))
+    
+    dpg.delete_item("commit_modal")
+
+    time.sleep(1)
+    for n in nodes:
+        n_tag = f"node_{n.id}"
+        if dpg.does_item_exist(n_tag):
+            dpg.set_item_label(n_tag, dpg.get_item_label(n_tag).replace("SIM", "FISICA"))
+
+    with dpg.window(label="Tests Completados", width=300, height=100, pos=[600, 300], modal=True, tag="test_complete_modal"):
+        global should_fail
+        if should_fail:
+            dpg.add_text("Tests fallidos. Commit cancelado.")
+            dpg.add_button(label="Cerrar", callback=lambda s, a: dpg.delete_item("test_complete_modal"))
+            should_fail = False
+        else:
+            dpg.add_text("Tests completados exitosamente.")
+            commit_changes_to_db(commit_msg)
+            dpg.add_button(label="Efectuar Cambios", callback=lambda s, a: dpg.delete_item("test_complete_modal"))
+            dpg.add_button(label="Cerrar", callback=lambda s, a: dpg.delete_item("test_complete_modal"))
 
 def commit_changes_panel():
     """Abre un modal para ingresar el mensaje de commit y confirmar."""
@@ -26,7 +73,7 @@ def commit_changes_panel():
         dpg.add_input_text(label="Mensaje de Commit", tag="commit_message")
         dpg.add_input_text(label="Contraseña", password=True, tag="auth_password")
         dpg.add_input_text(label="Token 2FA", tag="auth_2fa_token")
-        dpg.add_button(label="Siguiente", callback=lambda s, a: commit_changes_to_db())
+        dpg.add_button(label="Correr Tests", callback=lambda s, a: handle_test())
         dpg.add_button(label="Cancelar", callback=lambda s, a: dpg.delete_item("commit_modal"))
 
 def add_port_to_node():
@@ -146,6 +193,7 @@ def create_node_and_close_modal():
     node_name = dpg.get_value("new_node_name")
     node_type_name = dpg.get_value("new_node_type")
     
+    
     if not node_name or not node_type_name:
         print("Error: Nombre o tipo de nodo no especificado.")
         return
@@ -156,8 +204,8 @@ def create_node_and_close_modal():
             node_type = NodeType.get(NodeType.name == node_type_name)
             new_node = Node.create(name=node_name, node_type=node_type.id, pos_x=50, pos_y=50)
             # Crea puertos para evitar bug
-            Port.create(node=new_node, port_name="Input 1", port_type=INPUT_DENOM)
-            Port.create(node=new_node, port_name="Output 1", port_type=OUTPUT_DENOM)
+            Port.create(node=new_node, port_name="CONTROL", port_type=INPUT_DENOM)
+            Port.create(node=new_node, port_name="ACTION", port_type=OUTPUT_DENOM)
 
         print(f"Nodo '{node_name}' creado con ID {new_node.id}.")
         
@@ -178,15 +226,17 @@ def create_node_and_close_modal():
     dpg.delete_item("add_node_modal")
 
 def add_node_callback(sender, app_data):
-    """Callback para añadir un nuevo nodo (placeholder)."""
+    """Callback para añadir un nuevo nodo."""
     with dpg.window(label="Añadir Nodo", width=300, height=200, pos=[400, 200], modal=True, tag="add_node_modal"):
         dpg.add_input_text(label="Nombre del Nodo", tag="new_node_name")
         dpg.add_combo(label="Tipo de Nodo", items=[nt.name for nt in NodeType.select()], tag="new_node_type")
+        dpg.add_combo(label="Callback", items=["integration1.py", "patch37891.py"], tag="new_node_callback")
+        dpg.add_combo(label="Endpoint IP", items=["192.168.1.1-node_4.kairos.cloud"], tag="new_node_endpoint")
+        dpg.add_combo(label="Protocolo", items=["MQTT", "HTTP"], tag="new_node_protocol", default_value="MQTT")
         dpg.add_button(label="Crear", callback=lambda s, a: create_node_and_close_modal())
 
-
 def remove_node_callback(sender, app_data):
-    """Callback para eliminar un nodo seleccionado (placeholder)."""
+    """Callback para eliminar un nodo seleccionado."""
     select_nodes = dpg.get_selected_nodes(node_editor="node_editor")
     if not select_nodes:
         return
@@ -211,7 +261,7 @@ def add_ports_callback(sender, app_data):
         dpg.add_button(label="Añadir Puerto", callback=lambda s, a: add_port_to_node())
 
 def remove_ports_callback(sender, app_data):
-    """Callback para eliminar puertos de un nodo seleccionado (placeholder)."""
+    """Callback para eliminar puertos de un nodo seleccionado."""
     select_nodes = dpg.get_selected_nodes(node_editor="node_editor")
     if len(select_nodes) != 1:
         print("Seleccione un solo nodo para configurar.")
@@ -292,12 +342,11 @@ def link_callback(sender, app_data):
 
     try:
         db_proxy.connect(reuse_if_open=True)
-        with db_proxy.atomic(): # Transacción para seguridad
-            # Obtener los objetos Port desde la DB
+        with db_proxy.atomic(): # x seguridad
             from_port = Port.get_by_id(from_port_id)
             to_port = Port.get_by_id(to_port_id)
 
-            # Validar que la conexión sea válida (Output -> Input)
+            # Validar que la conexión es válida (Output -> Input)
             if from_port.port_type == OUTPUT_DENOM and to_port.port_type == INPUT_DENOM:
                 # Crear la conexión en la base de datos
                 Connection.create(from_port=from_port, to_port=to_port)
@@ -406,11 +455,10 @@ def main():
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Guardar Posiciones", callback=save_node_positions)
                 dpg.add_button(label="Commit Cambios", callback=lambda: commit_changes_panel())
-
+                dpg.add_button(label="Historial de Commits", callback=lambda: show_commit_history())
         with dpg.group(horizontal=True):
             with dpg.window(label="Nodos", width=1600, height=600, pos=[0, 50]):
                 with dpg.node_editor(callback=link_callback, delink_callback=delink_callback, tag="node_editor"):
-                    # Esta función llenará el editor con los datos de la DB
                     build_gui_from_db("node_editor")
 
             with dpg.window(label="Panel de Nodos", width=200, height=600, pos=[1610, 50]):
@@ -419,17 +467,19 @@ def main():
                 dpg.add_button(label="Añadir Puertos", callback=add_ports_callback)
                 dpg.add_button(label="Eliminar Puertos", callback=remove_ports_callback)
 
-    dpg.create_viewport(title='Eunomia - Dossier de Accion', width=1800, height=800)
+    dpg.create_viewport(title='Eunomia Consulting MVP - Prototype',
+                         width=1800,
+                         height=800,
+                         small_icon='favicon.ico')
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.set_primary_window("Primary Window", True)
     
     # Bucle principal de la aplicación
     while dpg.is_dearpygui_running():
-        # Aquí podrías añadir lógica que se ejecute en cada frame si es necesario
         dpg.render_dearpygui_frame()
 
-    # --- Limpieza al cerrar la aplicación ---
+    # Limpieza al cerrar la aplicaciónn
     print("Cerrando aplicación y guardando estado final...")
     save_node_positions()
     dpg.destroy_context()

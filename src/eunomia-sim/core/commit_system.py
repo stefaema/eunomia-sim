@@ -1,13 +1,15 @@
 import sqlite3
 import json
 import shutil
+import datetime
 from .persistance_api import MAIN_DB_PATH, STAGE_DB_PATH
+global commit_MESSAGE
+commit_MESSAGE = "No message"
 
 def _table_to_dict(conn, table):
     """Devuelve un dict {id: tuple_campos} para la tabla dada."""
     rows = conn.execute(f"SELECT * FROM {table}").fetchall()
     return {row[0]: row for row in rows}  # asume id en col 0
-
 
 def generate_diff():
     """Compara la DB principal y la staging y devuelve dict con cambios."""
@@ -58,17 +60,60 @@ def stringify_changes(diff: dict) -> str:
         return "Sin cambios detectados."
     return "\n".join(lines)
 
+def log_diff(diff: dict, msg:str, author: str = "admin", log_file: str = "commits.log"):
+    """
+    Escribe un log del diff con timestamp y autor en el archivo especificado.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    diff_str = stringify_changes(diff)
+    diff_hash = hash(json.dumps(diff, sort_keys=True))
+    log_entry = (
+        f"---\nTimestamp: {timestamp}\nMessage: {msg}\nAuthor: {author}\nAdmin: {author}\nDiff:\n{diff_str}\nDiff Hash: {diff_hash}\n\n"
+    )
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(log_entry)
 
-def commit_changes_to_db():
+def commit_changes_to_db(msg):
     """Genera diff, muestra y si todo ok, reemplaza main db con staging."""
     diff = generate_diff()
-    # Mostrar diff en consola o GUI
-    # Aquí podrías pedir confirmación al usuario (ej. un popup en DearPyGui)
-    user_ok = True  # placeholder: integrar UI real
+ 
+    print(stringify_changes(diff))
+
+    user_ok = True  
     if not user_ok:
         print("Commit cancelado.")
         return
 
-    # Reemplazar base principal
     shutil.copyfile(STAGE_DB_PATH, MAIN_DB_PATH)
     print(f"Commit aplicado. {MAIN_DB_PATH} actualizado.")
+    log_diff(diff, msg)
+
+def get_commits(log_file: str = "commits.log") -> list:
+    """Lee el archivo de log y devuelve una lista de commits como dicts."""
+    commits = []
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        return commits
+
+    raw_commits = content.strip().split("---\n")
+    for entry in raw_commits:
+        if not entry.strip():
+            continue
+        lines = entry.strip().split("\n")
+        commit = {}
+
+        for line in lines:
+            if line.startswith("Timestamp:"):
+                commit["timestamp"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Message:"):
+                commit["message"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Author:"):
+                commit["author"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Admin:"):
+                commit["admin"] = line.split(":", 1)[1].strip()
+            elif line.startswith("Diff Hash:"):
+                commit["diff_hash"] = line.split(":", 1)[1].strip()
+        commits.append(commit)
+    return commits
